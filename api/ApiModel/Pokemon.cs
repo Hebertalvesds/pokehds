@@ -8,6 +8,6 @@ namespace api.ApiModel
         public string Name { get; set; }
         public int Height { get; set; }
         public int Weight { get; set; }
-        public List<string> Evolutions { get; set; }
+        public List<Pokemon> Evolutions { get; set; }
     }
 }

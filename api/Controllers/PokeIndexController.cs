@@ -20,18 +20,25 @@ namespace api.Controllers
         [Route("pokemon/{pokemonId}")]
         public JsonResult GetPokemon(int pokemonId)
         {
-            var uri = string.Format(_endpoints.Base + _endpoints.Pokemon, pokemonId);
-            var response = GetUrl(uri).Result;
-            Pokemon pokemon = null;
-
-            if (response.IsSuccessStatusCode)
+            var response = new Response
             {
-                var json = response.Content.ReadAsStringAsync().Result;
-                pokemon = JsonConvert.DeserializeObject<Pokemon>(json);
-                pokemon.Evolutions = GetEvolutions(pokemon);
+                Pokemon = null,
+                StatusCode = 200,
+                Success = true,
+                ErrorMessage = string.Empty
+            };
+
+            try
+            {
+                var pokemon = Pokemon(pokemonId.ToString());
+                response.Pokemon = pokemon;
+            }
+            catch (Exception ex)
+            {
+                response.ErrorMessage = ex.Message;
             }
 
-            return Json(pokemon);
+            return Json(response);
 
         }
 
@@ -40,19 +47,23 @@ namespace api.Controllers
         [Route("pokemon/name")]
         public JsonResult GetPokemon(string pokemonName)
         {
-            var uri = string.Format(_endpoints.Base + _endpoints.Pokemon, pokemonName);
-            var response = GetUrl(uri).Result;
-            Pokemon pokemon = null;
+            var response = new Response { 
+                Pokemon = null, 
+                StatusCode = 200, 
+                Success = true, 
+                ErrorMessage = string.Empty 
+            };
 
-            if (response.IsSuccessStatusCode)
+            try
             {
-                var json = response.Content.ReadAsStringAsync().Result;
-                pokemon = JsonConvert.DeserializeObject<Pokemon>(json);
-                pokemon.Evolutions = GetEvolutions(pokemon);
+                var pokemon = Pokemon(pokemonName);
+                response.Pokemon = pokemon;
+            }catch (Exception ex)
+            {
+                response.ErrorMessage = ex.Message;
             }
 
-            return Json(pokemon);
-
+            return Json(response);
         }
 
         [HttpGet]
@@ -61,7 +72,7 @@ namespace api.Controllers
         public JsonResult GetList(int limit = 10)
         {
             var randon = new Random();
-            var pokeId = randon.Next(1, 898);
+            var pokeId = randon.Next(1, _endpoints.MaxPokemonNumber);
             List<Pokemon> pokemonsList = new List<Pokemon>();
 
             for(int i = 0; i < limit; i++)
@@ -102,10 +113,25 @@ namespace api.Controllers
             return jsonResult;
         }
 
-        private List<string> GetEvolutions(Pokemon pokemon)
+        private Pokemon Pokemon(string pokemonIdOrName)
+        {
+            var uri = string.Format(_endpoints.Base + _endpoints.Pokemon, pokemonIdOrName);
+            var response = GetUrl(uri).Result;
+            Pokemon pokemon = null;
+
+            if (response.IsSuccessStatusCode)
+            {
+                var json = response.Content.ReadAsStringAsync().Result;
+                pokemon = JsonConvert.DeserializeObject<Pokemon>(json);
+                pokemon.Evolutions = GetEvolutions(pokemon);
+            }
+
+            return pokemon;
+        }
+        private List<Pokemon> GetEvolutions(Pokemon pokemon)
         {
             var uri = string.Format(_endpoints.Base + _endpoints.Evolution, pokemon.Id);
-            List<string> evolutions = new List<string>();
+            List<Pokemon> evolutions = new List<Pokemon>();
 
             var response = GetUrl(uri).Result;
 
@@ -120,7 +146,11 @@ namespace api.Controllers
                     if (match.Count > 0)
                     {
                         foreach(var evo in match)
-                            evolutions.Add(evo.ToString().Replace("species\":{\"name\":\"", ""));
+                        {
+                            var evoName = evo.ToString().Replace("species\":{\"name\":\"", "");
+                            var evolution = Pokemon(evoName);
+                            evolutions.Add(evolution);
+                        }
                     }
                 }
             }
