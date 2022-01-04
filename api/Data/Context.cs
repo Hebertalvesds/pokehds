@@ -10,6 +10,7 @@ namespace api.Data
     public class Context : DbContext
     {
         public DbSet<Trainer> Trainers;
+        public DbSet<CapturedPokemon> Pokemons;
 
         public Context()
         {
@@ -31,8 +32,21 @@ namespace api.Data
             modelBuilder.Entity<Trainer>(entity =>
             {
                 entity.HasKey(t => t.Id);
+                entity.HasMany<CapturedPokemon>(e => e.CapturedPokemons).WithOne();
                 entity.Property(t => t.CreatAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+                entity.Navigation(e => e.CapturedPokemons)
+                    .UsePropertyAccessMode(PropertyAccessMode.Property);
+                
             });
+
+            modelBuilder.Entity<CapturedPokemon>(entity =>
+            {
+                entity.HasOne(e => e.Trainer)
+                    .WithMany(t => t.CapturedPokemons)
+                    .HasForeignKey(e => e.TrainerId);
+            });
+
+
             base.OnModelCreating(modelBuilder);
         }
 
