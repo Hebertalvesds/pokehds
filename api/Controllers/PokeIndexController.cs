@@ -2,11 +2,12 @@
 using api.Extensions;
 using api.Model;
 using Microsoft.AspNetCore.Mvc;
-using Newtonsoft.Json;
+using System.Text.Json;
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Dynamic;
 
 namespace api.Controllers
 {
@@ -17,53 +18,31 @@ namespace api.Controllers
 
         [HttpGet]
         //GET: pokemon/1
-        [Route("pokemon/{pokemonId}")]
-        public JsonResult GetPokemon(int pokemonId)
+        //GET: pokemon/bulbasaur
+        [Route("pokemon/{idOrName}")]
+        public JsonResult GetPokemon(string idOrName = "1")
         {
             var response = new Response
             {
-                Pokemon = null,
                 StatusCode = 200,
                 Success = true,
-                ErrorMessage = string.Empty
+                Message = string.Empty
             };
 
             try
             {
-                var pokemon = Pokemon(pokemonId.ToString());
-                response.Pokemon = pokemon;
+                var pokemon = GetInternalPokemon(idOrName);
+                response.Message = pokemon;
             }
             catch (Exception ex)
             {
-                response.ErrorMessage = ex.Message;
+                response.Success = false;
+                response.Message = ex.Message;
+                response.StatusCode = 400;
             }
 
             return Json(response);
 
-        }
-
-        [HttpGet]
-        //GET: pokemon/bulbasaur
-        [Route("pokemon/name")]
-        public JsonResult GetPokemon(string pokemonName)
-        {
-            var response = new Response { 
-                Pokemon = null, 
-                StatusCode = 200, 
-                Success = true, 
-                ErrorMessage = string.Empty 
-            };
-
-            try
-            {
-                var pokemon = Pokemon(pokemonName);
-                response.Pokemon = pokemon;
-            }catch (Exception ex)
-            {
-                response.ErrorMessage = ex.Message;
-            }
-
-            return Json(response);
         }
 
         [HttpGet]
@@ -71,49 +50,41 @@ namespace api.Controllers
         [Route("pokemon/list/{limit}")]
         public JsonResult GetList(int limit = 10)
         {
-            var randon = new Random();
-            var pokeId = randon.Next(1, _endpoints.MaxPokemonNumber);
+            var pokeId = 0;
             List<Pokemon> pokemonsList = new List<Pokemon>();
+            List<int> generatedIds = new List<int> { 0 };
 
-            for(int i = 0; i < limit; i++)
+            var response = new Response
             {
-                var uri = string.Format(_endpoints.Base + _endpoints.Pokemon, pokeId);
-                var response = GetUrl(uri).Result;
-                Pokemon pokemon = null;
+                Message = string.Empty,
+                StatusCode = 200,
+                Success = true
+            };
 
-                if (response.IsSuccessStatusCode)
+            try
+            {
+                for (int i = 0; i < limit; i++)
                 {
-                    var json = response.Content.ReadAsStringAsync().Result;
-                    pokemon = JsonConvert.DeserializeObject<Pokemon>(json);
-                    pokemon.Evolutions = GetEvolutions(pokemon);
+                    pokeId = RandomizePokeId(pokeId, generatedIds);
+
+                    var pokemon = GetInternalPokemon(pokeId.ToString());
                     pokemonsList.Add(pokemon);
+
+                    generatedIds.Add(pokeId);
                 }
+
+            }catch (Exception ex)
+            {
+                response.Success = false;
+                response.Message = ex.Message;
+                response.StatusCode = 400;
             }
 
             return Json(pokemonsList);
 
         }
 
-        [HttpPost]
-        [Route("trainer")]
-        public JsonResult Trainer(Trainer trainer)
-        {
-            var jsonResult = new JsonResult("");
-            try
-            {
-                db.Trainers.Add(trainer);
-                if (db.SaveChanges().ToBool())
-                    jsonResult = Json(new { success = "true", trainer = trainer });
-            }
-            catch(Exception ex)
-            {
-                jsonResult = Json(new { success = "false", message = ex.Message });
-            }
-
-            return jsonResult;
-        }
-
-        private Pokemon Pokemon(string pokemonIdOrName)
+        private Pokemon GetInternalPokemon(string pokemonIdOrName, bool isEvolution = false)
         {
             var uri = string.Format(_endpoints.Base + _endpoints.Pokemon, pokemonIdOrName);
             var response = GetUrl(uri).Result;
@@ -122,15 +93,40 @@ namespace api.Controllers
             if (response.IsSuccessStatusCode)
             {
                 var json = response.Content.ReadAsStringAsync().Result;
-                pokemon = JsonConvert.DeserializeObject<Pokemon>(json);
-                pokemon.Evolutions = GetEvolutions(pokemon);
+                pokemon = JsonSerializer.Deserialize<Pokemon>(json);
+                pokemon.Evolutions = isEvolution ? null : GetEvolutions(pokemon);
             }
 
             return pokemon;
         }
+
+        private string ExtractEvolutionChainUrl(Pokemon pokemon)
+        {
+            var uri = string.Format(_endpoints.Base + _endpoints.Species, pokemon.Id);
+            string url = string.Empty;
+
+            try
+            {
+                var responseMessage = GetUrl(uri).Result;
+                if (responseMessage.IsSuccessStatusCode)
+                {
+                    dynamic data = JsonSerializer.Deserialize<ExpandoObject>(responseMessage.Content.ReadAsStringAsync().Result);
+                    pokemon.IsBaby = data?.is_baby?.ToString().ToLower().Equals("true");
+                    var evolutionChain = JsonSerializer.Deserialize<ExpandoObject>(data?.evolution_chain?.ToString());
+                    url = evolutionChain.url?.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(ex.Message);
+            }
+
+            return url;
+        }
+
         private List<Pokemon> GetEvolutions(Pokemon pokemon)
         {
-            var uri = string.Format(_endpoints.Base + _endpoints.Evolution, pokemon.Id);
+            var uri = ExtractEvolutionChainUrl(pokemon);
             List<Pokemon> evolutions = new List<Pokemon>();
 
             var response = GetUrl(uri).Result;
@@ -145,11 +141,14 @@ namespace api.Controllers
                     var match = regex.Matches(textJson);
                     if (match.Count > 0)
                     {
-                        foreach(var evo in match)
+                        for (var i = 0; i < match.Count; i++)
                         {
-                            var evoName = evo.ToString().Replace("species\":{\"name\":\"", "");
-                            var evolution = Pokemon(evoName);
-                            evolutions.Add(evolution);
+                            var evo = match[i].ToString().Replace("species\":{\"name\":\"", "");
+                            if (evo.Equals(pokemon.Name.ToLower()))
+                                continue;
+
+                            var pokemonEvo = GetInternalPokemon(evo, true);
+                            evolutions.Add(pokemonEvo);
                         }
                     }
                 }
@@ -159,7 +158,20 @@ namespace api.Controllers
 
             return reversed;
         }
-
+        private int RandomizePokeId(int currentId, List<int> generatedIds)
+        {
+            var randon = new Random();
+            var newId = currentId;
+            if (generatedIds.Contains(currentId))
+            {
+                currentId = randon.Next(1, _endpoints.MaxPokemonNumber);
+                return RandomizePokeId(currentId, generatedIds);
+            }
+            else
+            {
+                return newId;
+            }
+        }
 
     }
 }

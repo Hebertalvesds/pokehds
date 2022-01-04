@@ -33,6 +33,8 @@ namespace api.Controllers
             {
                 DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true,
+                
             };
             return base.Json(data, serializer);
         }
